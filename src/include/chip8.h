@@ -14,10 +14,14 @@ struct CHIP8 {
   uint8_t delay;
   uint8_t timer;
 
+  uint8_t DispMem[64 * 32 / 8];
+  uint8_t drawFlag;
 };
 
-void chip8_init(char *);
-void chip8_start();
+void *chip8_init(char *);
+void chip8_start(void *, void *, void *);
+
+void chip8_renderTo(uint32_t *);
 struct CHIP8 *chip8_inter_pointer();
 
 #endif
