@@ -3,15 +3,22 @@
 #include <SDL2/SDL_events.h>
 #include <SDL2/SDL_rect.h>
 #include <SDL2/SDL_render.h>
+#include <SDL2/SDL_timer.h>
 #include <SDL2/SDL_video.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+
 #include <time.h>
 
 #include <SDL2/SDL.h>
 
+#define FREQ 60
+
 static struct CHIP8 inter;
+
+FILE* log_ptr;
 
 void chip8_renderTo(uint32_t *pix) {
   for (unsigned pos = 0; pos < 64 * 32; ++pos) {
@@ -23,7 +30,13 @@ void *chip8_init(char *path) {
   // Open file
   FILE *ptr = fopen(path, "rb");
   if (ptr == NULL) {
-    printf("Can't open file!\n");
+    fprintf(log_ptr, "Can't open file!\n");
+    exit(1);
+  }
+
+  log_ptr = fopen("log.txt", "w");
+  if (ptr == NULL) {
+    fprintf(log_ptr, "Can't open log file!\n");
     exit(1);
   }
 
@@ -64,15 +77,15 @@ void *chip8_init(char *path) {
   }
 
   fread(inter.c_mem + 0x200, 1, 0x1000 - 0x200, ptr);
-  fclose(ptr);
 
   if (SDL_Init(SDL_INIT_EVERYTHING) != 0) {
-    printf("Error! Can't init SDL! (%s)\n", SDL_GetError());
+    fprintf(log_ptr, "Error! Can't init SDL! (%s)\n", SDL_GetError());
   }
 
   SDL_Window *w = SDL_CreateWindow("chip8", SDL_WINDOWPOS_CENTERED,
-                                   SDL_WINDOWPOS_CENTERED, 800, 400, 0);
+                                   SDL_WINDOWPOS_CENTERED, 800, 400, SDL_WINDOW_RESIZABLE);
 
+  fclose(ptr);
   return (void *)w;
 }
 
@@ -84,9 +97,17 @@ void chip8_start(void *_win, void *_ren, void *_tex) {
   SDL_Event ev;
   srand(time(NULL));
 
+
+  uint8_t drawAtInterval = 0;
   uint8_t _break = 0;
+
+  uint32_t sTime = 0;
+  uint32_t eTime = sTime;
+
   while (!_break) {
+    sTime = SDL_GetTicks();
     // SDL EVENTS!
+    eTime = sTime + (1000 / FREQ);
     while (SDL_PollEvent(&ev))
       if (ev.type == SDL_QUIT) {
         _break = 1;
@@ -100,60 +121,61 @@ void chip8_start(void *_win, void *_ren, void *_tex) {
     uint16_t y = (op & 0x00F0) >> 4;
     uint16_t nib = op & 0x000F;
 
-    printf("chip8_start: PC: %X\n", inter.PC);
-    printf("chip8_start: got OP code: %04X\n", op);
+    fprintf(log_ptr, "chip8_start: PC: %X\n", inter.PC);
+    fprintf(log_ptr, "chip8_start: got OP code: %04X\n", op);
 
     switch ((op & 0xF000) >> 12) {
     case 0:
       if (nnn == 0x0E0) {
         // CLS
-        printf("chip8_start: CLS\n");
-
+        fprintf(log_ptr, "chip8_start: CLS\n");
+        SDL_RenderClear(ren);
+        SDL_RenderPresent(ren);
         inter.PC += 2;
       } else if (nnn == 0x0EE) {
         // RET
-        printf("chip8_start: RET\n");
+        fprintf(log_ptr, "chip8_start: RET\n");
       } else {
         // SYS
-        printf("chip8_start: SYS\n");
-        printf("Stoping exec...\n");
+        fprintf(log_ptr, "chip8_start: SYS\n");
+        fprintf(log_ptr, "Stoping exec...\n");
 
         _break = 1;
       }
       break;
 
     case 1:
-      printf("chip8_start: JP addr\n");
+      fprintf(log_ptr, "chip8_start: JP addr\n");
       inter.PC = nnn;
       break;
 
     case 2:
-      printf("chip8_start: CALL addr\n");
+      fprintf(log_ptr, "chip8_start: CALL addr\n");
       break;
 
     case 3:
-      printf("chip8_start: SE Vx, byte\n");
+      fprintf(log_ptr, "chip8_start: SE Vx, byte\n");
       inter.PC = inter.PC + ((inter.V[x] == kk) ? 4 : 2);
       break;
 
     case 4:
-      printf("chip8_start: SNE Vx, byte\n");
+      fprintf(log_ptr, "chip8_start: SNE Vx, byte\n");
       inter.PC = inter.PC + ((inter.V[x] != kk) ? 4 : 2);
       break;
 
     case 5:
-      printf("chip8_start: SE Vx, Vy\n");
+      fprintf(log_ptr, "chip8_start: SE Vx, Vy\n");
       inter.PC = inter.PC + ((inter.V[x] == inter.V[y]) ? 4 : 2);
       break;
 
     case 6:
-      printf("chip8_start: LD Vx, byte\n");
+      fprintf(log_ptr, "chip8_start: LD Vx, byte\n");
       inter.V[x] = kk;
       inter.PC += 2;
       break;
 
     case 7:
-      printf("chip8_start: ADD Vx, byte\n");
+      fprintf(log_ptr, "chip8_start: ADD Vx, byte\n");
       inter.V[x] = inter.V[x] + kk;
       inter.PC += 2;
       break;
@@ -161,31 +183,31 @@ void chip8_start(void *_win, void *_ren, void *_tex) {
     case 8:
       switch (op & 0x000F) {
       case 0:
-        printf("chip8_start: LD Vx, Vy\n");
+        fprintf(log_ptr, "chip8_start: LD Vx, Vy\n");
         inter.V[x] = inter.V[y];
         inter.PC += 2;
         break;
 
       case 1:
-        printf("chip8_start: OR Vx, Vy\n");
+        fprintf(log_ptr, "chip8_start: OR Vx, Vy\n");
         inter.V[x] = inter.V[x] | inter.V[y];
         inter.PC += 2;
         break;
 
       case 2:
-        printf("chip8_start: AND Vx, Vy\n");
+        fprintf(log_ptr, "chip8_start: AND Vx, Vy\n");
         inter.V[x] = inter.V[x] & inter.V[y];
         inter.PC += 2;
         break;
 
       case 3:
-        printf("chip8_start: XOR Vx, Vy\n");
+        fprintf(log_ptr, "chip8_start: XOR Vx, Vy\n");
         inter.V[x] = inter.V[x] ^ inter.V[y];
         inter.PC += 2;
         break;
 
       case 4:
-        printf("chip8_start: ADD Vx, Vy\n");
+        fprintf(log_ptr, "chip8_start: ADD Vx, Vy\n");
         uint8_t tmp = inter.V[x];
         inter.V[x] = inter.V[x] + inter.V[y];
         if (tmp > inter.V[x])
@@ -196,49 +218,49 @@ void chip8_start(void *_win, void *_ren, void *_tex) {
         break;
 
       case 5:
-        printf("chip8_start: SUB Vx, Vy\n");
+        fprintf(log_ptr, "chip8_start: SUB Vx, Vy\n");
         break;
 
       case 6:
-        printf("chip8_start: SHR Vx, Vy\n");
+        fprintf(log_ptr, "chip8_start: SHR Vx, Vy\n");
         break;
 
       case 7:
-        printf("chip8_start: SUBN Vx, Vy\n");
+        fprintf(log_ptr, "chip8_start: SUBN Vx, Vy\n");
         break;
 
       case 0xE:
-        printf("chip8_start: SHL Vx, Vy\n");
+        fprintf(log_ptr, "chip8_start: SHL Vx, Vy\n");
         break;
 
       default:
-        printf("chip8_start: NO OPCODE: %X\n", op);
+        //fprintf(log_ptr, "chip8_start: NO OPCODE: %X\n", op);
         break;
       }
       break;
 
     case 9:
-      printf("chip8_start: SNE Vx, Vy\n");
+      fprintf(log_ptr, "chip8_start: SNE Vx, Vy\n");
       break;
 
     case 0xA:
-      printf("chip8_start: LD I, addr\n");
+      fprintf(log_ptr, "chip8_start: LD I, addr\n");
       inter.I = nnn;
       inter.PC += 2;
       break;
 
     case 0xB:
-      printf("chip8_start: JP V0, addr\n");
+      fprintf(log_ptr, "chip8_start: JP V0, addr\n");
       break;
 
     case 0xC:
-      printf("chip8_start: RND Vx, byte\n");
+      fprintf(log_ptr, "chip8_start: RND Vx, byte\n");
       inter.V[x] = (rand() % 0x100) & kk;
       inter.PC += 2;
       break;
 
     case 0xD:
-      printf("chip8_start: DRW Vx, Vy, nibble\n");
+      fprintf(log_ptr, "chip8_start: DRW Vx, Vy, nibble\n");
       inter.V[0xF] = 0;
 
       uint8_t pixel;
@@ -261,58 +283,58 @@ void chip8_start(void *_win, void *_ren, void *_tex) {
 
     case 0xE:
       if (kk == 0x9E) {
-        printf("chip8_start: SKP Vx\n");
+        fprintf(log_ptr, "chip8_start: SKP Vx\n");
       } else if (kk == 0xA1) {
-        printf("chip8_start: SKNP Vx\n");
+        fprintf(log_ptr, "chip8_start: SKNP Vx\n");
       } else {
-        printf("chip8_start: NO OPCODE: %X\n", op);
+        //fprintf(log_ptr, "chip8_start: NO OPCODE: %X\n", op);
       }
       break;
 
     case 0xF:
       switch (kk) {
       case 0x07:
-        printf("chip8_start: LD Vx, DT\n");
+        fprintf(log_ptr, "chip8_start: LD Vx, DT\n");
         break;
 
       case 0x0A:
-        printf("chip8_start: LD Vx, Keyboard\n");
+        fprintf(log_ptr, "chip8_start: LD Vx, Keyboard\n");
         break;
 
       case 0x15:
-        printf("chip8_start: LD DT, Vx\n");
+        fprintf(log_ptr, "chip8_start: LD DT, Vx\n");
         break;
 
       case 0x18:
-        printf("chip8_start: LD ST, Vx\n");
+        fprintf(log_ptr, "chip8_start: LD ST, Vx\n");
         break;
 
       case 0x1E:
-        printf("chip8_start: ADD I, Vx\n");
+        fprintf(log_ptr, "chip8_start: ADD I, Vx\n");
         break;
 
       case 0x29:
-        printf("chip8_start: LD F, Vx\n");
+        fprintf(log_ptr, "chip8_start: LD F, Vx\n");
         break;
 
       case 0x33:
-        printf("chip8_start: LD B, Vx\n");
+        fprintf(log_ptr, "chip8_start: LD B, Vx\n");
         break;
 
       case 0x55:
-        printf("chip8_start: LD [I], Vx\n");
+        fprintf(log_ptr, "chip8_start: LD [I], Vx\n");
         break;
 
       case 0x65:
-        printf("chip8_start: LD Vx, [I]\n");
+        fprintf(log_ptr, "chip8_start: LD Vx, [I]\n");
         break;
 
       default:
-        printf("chip8_start: NO OPCODE: %X\n", op);
+        //fprintf(log_ptr, "chip8_start: NO OPCODE: %X\n", op);
         break;
       }
     default:
-      printf("chip8_start: NO OPCODE: %X\n", op);
+      //fprintf(log_ptr, "chip8_start: NO OPCODE: %X\n", op);
       break;
     }
 
@@ -351,6 +373,17 @@ void chip8_start(void *_win, void *_ren, void *_tex) {
      *i++;
      * Used for testing, not needed anymore.
      **/
+    
+    drawAtInterval++;
+    if(drawAtInterval == 20) {
+      inter.drawFlag = 1;
+      drawAtInterval = 0;
+    }
+
+    uint32_t now = SDL_GetTicks();
+    uint32_t _t = (now >= eTime) ? 0 : (eTime - now);
+
+    SDL_Delay(_t);
   }
 }
 
