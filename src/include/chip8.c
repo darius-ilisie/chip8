@@ -1,8 +1,10 @@
 #include "chip8.h"
+#include "inter.h"
 #include <SDL2/SDL_error.h>
 #include <SDL2/SDL_events.h>
 #include <SDL2/SDL_rect.h>
 #include <SDL2/SDL_render.h>
+#include <SDL2/SDL_stdinc.h>
 #include <SDL2/SDL_timer.h>
 #include <SDL2/SDL_video.h>
 #include <stdint.h>
@@ -18,7 +20,7 @@
 
 static struct CHIP8 inter;
 
-FILE* log_ptr;
+FILE *log_ptr;
 
 void chip8_renderTo(uint32_t *pix) {
   for (unsigned pos = 0; pos < 64 * 32; ++pos) {
@@ -46,6 +48,10 @@ void *chip8_init(char *path) {
   for (unsigned i = 0; i < 0x10; i++) {
     inter.V[i] = 0;
     inter.stack[i] = 0;
+  }
+
+  for (unsigned i = 0; i < 64 * 32 / 8; i++) {
+    inter.DispMem[i] = 0;
   }
 
   inter.SP = 0;
@@ -82,8 +88,9 @@ void *chip8_init(char *path) {
     fprintf(log_ptr, "Error! Can't init SDL! (%s)\n", SDL_GetError());
   }
 
-  SDL_Window *w = SDL_CreateWindow("chip8", SDL_WINDOWPOS_CENTERED,
-                                   SDL_WINDOWPOS_CENTERED, 800, 400, SDL_WINDOW_RESIZABLE);
+  SDL_Window *w =
+      SDL_CreateWindow("chip8", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+                       800, 400, SDL_WINDOW_RESIZABLE);
 
   fclose(ptr);
   return (void *)w;
@@ -97,257 +104,51 @@ void chip8_start(void *_win, void *_ren, void *_tex) {
   SDL_Event ev;
   srand(time(NULL));
 
-
-  uint8_t drawAtInterval = 0;
-  uint8_t _break = 0;
+  uint8_t timmers = 0;
 
   uint32_t sTime = 0;
   uint32_t eTime = sTime;
 
-  while (!_break) {
+  while (!inter.exec_break) {
     sTime = SDL_GetTicks();
     // SDL EVENTS!
     eTime = sTime + (1000 / FREQ);
-    while (SDL_PollEvent(&ev))
-      if (ev.type == SDL_QUIT) {
-        _break = 1;
+    while (SDL_PollEvent(&ev)) {
+      switch (ev.type) {
+      case SDL_QUIT:
+        inter.exec_break = 1;
         break;
-      }
-
-    uint16_t op = (inter.c_mem[inter.PC] << 8) + (inter.c_mem[inter.PC + 1]);
-    uint16_t nnn = op & 0x0FFF;
-    uint16_t kk = op & 0x00FF;
-    uint16_t x = (op & 0x0F00) >> 8;
-    uint16_t y = (op & 0x00F0) >> 4;
-    uint16_t nib = op & 0x000F;
-
-    fprintf(log_ptr, "chip8_start: PC: %X\n", inter.PC);
-    fprintf(log_ptr, "chip8_start: got OP code: %04X\n", op);
-
-    switch ((op & 0xF000) >> 12) {
-    case 0:
-      if (nnn == 0x0E0) {
-        // CLS
-        fprintf(log_ptr, "chip8_start: CLS\n");
-        SDL_RenderClear(ren);
-        SDL_RenderPresent(ren);
-        inter.PC += 2;
-      } else if (nnn == 0x0EE) {
-        // RET
-        fprintf(log_ptr, "chip8_start: RET\n");
-      } else {
-        // SYS
-        fprintf(log_ptr, "chip8_start: SYS\n");
-        fprintf(log_ptr, "Stoping exec...\n");
-
-        _break = 1;
-      }
-      break;
-
-    case 1:
-      fprintf(log_ptr, "chip8_start: JP addr\n");
-      inter.PC = nnn;
-      break;
-
-    case 2:
-      fprintf(log_ptr, "chip8_start: CALL addr\n");
-      break;
-
-    case 3:
-      fprintf(log_ptr, "chip8_start: SE Vx, byte\n");
-      inter.PC = inter.PC + ((inter.V[x] == kk) ? 4 : 2);
-      break;
-
-    case 4:
-      fprintf(log_ptr, "chip8_start: SNE Vx, byte\n");
-      inter.PC = inter.PC + ((inter.V[x] != kk) ? 4 : 2);
-      break;
-
-    case 5:
-      fprintf(log_ptr, "chip8_start: SE Vx, Vy\n");
-      inter.PC = inter.PC + ((inter.V[x] == inter.V[y]) ? 4 : 2);
-      break;
-
-    case 6:
-      fprintf(log_ptr, "chip8_start: LD Vx, byte\n");
-      inter.V[x] = kk;
-      inter.PC += 2;
-      break;
-
-    case 7:
-      fprintf(log_ptr, "chip8_start: ADD Vx, byte\n");
-      inter.V[x] = inter.V[x] + kk;
-      inter.PC += 2;
-      break;
-
-    case 8:
-      switch (op & 0x000F) {
-      case 0:
-        fprintf(log_ptr, "chip8_start: LD Vx, Vy\n");
-        inter.V[x] = inter.V[y];
-        inter.PC += 2;
-        break;
-
-      case 1:
-        fprintf(log_ptr, "chip8_start: OR Vx, Vy\n");
-        inter.V[x] = inter.V[x] | inter.V[y];
-        inter.PC += 2;
-        break;
-
-      case 2:
-        fprintf(log_ptr, "chip8_start: AND Vx, Vy\n");
-        inter.V[x] = inter.V[x] & inter.V[y];
-        inter.PC += 2;
-        break;
-
-      case 3:
-        fprintf(log_ptr, "chip8_start: XOR Vx, Vy\n");
-        inter.V[x] = inter.V[x] ^ inter.V[y];
-        inter.PC += 2;
-        break;
-
-      case 4:
-        fprintf(log_ptr, "chip8_start: ADD Vx, Vy\n");
-        uint8_t tmp = inter.V[x];
-        inter.V[x] = inter.V[x] + inter.V[y];
-        if (tmp > inter.V[x])
-          inter.V[0xF] = 1;
-        else
-          inter.V[0xF] = 0;
-        inter.PC += 2;
-        break;
-
-      case 5:
-        fprintf(log_ptr, "chip8_start: SUB Vx, Vy\n");
-        break;
-
-      case 6:
-        fprintf(log_ptr, "chip8_start: SHR Vx, Vy\n");
-        break;
-
-      case 7:
-        fprintf(log_ptr, "chip8_start: SUBN Vx, Vy\n");
-        break;
-
-      case 0xE:
-        fprintf(log_ptr, "chip8_start: SHL Vx, Vy\n");
-        break;
-
-      default:
-        //fprintf(log_ptr, "chip8_start: NO OPCODE: %X\n", op);
-        break;
-      }
-      break;
-
-    case 9:
-      fprintf(log_ptr, "chip8_start: SNE Vx, Vy\n");
-      break;
-
-    case 0xA:
-      fprintf(log_ptr, "chip8_start: LD I, addr\n");
-      inter.I = nnn;
-      inter.PC += 2;
-      break;
-
-    case 0xB:
-      fprintf(log_ptr, "chip8_start: JP V0, addr\n");
-      break;
-
-    case 0xC:
-      fprintf(log_ptr, "chip8_start: RND Vx, byte\n");
-      inter.V[x] = (rand() % 0x100) & kk;
-      inter.PC += 2;
-      break;
-
-    case 0xD:
-      fprintf(log_ptr, "chip8_start: DRW Vx, Vy, nibble\n");
-      inter.V[0xF] = 0;
-
-      uint8_t pixel;
-      inter.V[0xF] = 0;
-      for (int yline = 0; yline < nib; yline++) {
-        pixel = inter.c_mem[inter.I + yline];
-        for (int xline = 0; xline < 8; xline++) {
-          if ((pixel & (0x80 >> xline)) != 0) {
-            if (inter.DispMem[(inter.V[x] + xline + ((inter.V[y] + yline) * 64))] == 1) {
-              inter.V[0xF] = 1;
-            }
-            inter.DispMem[inter.V[x] + xline + ((inter.V[y] + yline) * 64)] ^= 1;
-          }
+      case SDL_WINDOWEVENT:
+        switch (ev.window.event) {
+        case SDL_WINDOWEVENT_MAXIMIZED:
+        case SDL_WINDOWEVENT_MINIMIZED:
+        case SDL_WINDOWEVENT_RESIZED:
+        case SDL_WINDOWEVENT_SIZE_CHANGED:
+          inter.drawFlag = 1;
+          break;
+        default:
+          break;
         }
-      }
-
-      inter.drawFlag = 1;
-      inter.PC += 2;
-      break;
-
-    case 0xE:
-      if (kk == 0x9E) {
-        fprintf(log_ptr, "chip8_start: SKP Vx\n");
-      } else if (kk == 0xA1) {
-        fprintf(log_ptr, "chip8_start: SKNP Vx\n");
-      } else {
-        //fprintf(log_ptr, "chip8_start: NO OPCODE: %X\n", op);
-      }
-      break;
-
-    case 0xF:
-      switch (kk) {
-      case 0x07:
-        fprintf(log_ptr, "chip8_start: LD Vx, DT\n");
         break;
-
-      case 0x0A:
-        fprintf(log_ptr, "chip8_start: LD Vx, Keyboard\n");
-        break;
-
-      case 0x15:
-        fprintf(log_ptr, "chip8_start: LD DT, Vx\n");
-        break;
-
-      case 0x18:
-        fprintf(log_ptr, "chip8_start: LD ST, Vx\n");
-        break;
-
-      case 0x1E:
-        fprintf(log_ptr, "chip8_start: ADD I, Vx\n");
-        break;
-
-      case 0x29:
-        fprintf(log_ptr, "chip8_start: LD F, Vx\n");
-        break;
-
-      case 0x33:
-        fprintf(log_ptr, "chip8_start: LD B, Vx\n");
-        break;
-
-      case 0x55:
-        fprintf(log_ptr, "chip8_start: LD [I], Vx\n");
-        break;
-
-      case 0x65:
-        fprintf(log_ptr, "chip8_start: LD Vx, [I]\n");
-        break;
-
       default:
-        //fprintf(log_ptr, "chip8_start: NO OPCODE: %X\n", op);
         break;
       }
-    default:
-      //fprintf(log_ptr, "chip8_start: NO OPCODE: %X\n", op);
-      break;
+
+      /*if (ev.type == SDL_QUIT) {
+        inter.exec_break = 1;
+        break;
+      }*/
     }
+    // Step
+    chip8_step(&inter, log_ptr);
 
     // Check for drawFlag
     if (inter.drawFlag == 1) {
       SDL_Rect r;
       uint8_t x, y;
 
-      r.x = 0;
-      r.y = 0;
-
-      r.w = 1;
-      r.h = 1;
+      r.x = r.y = 0;
+      r.w = r.h = 1;
 
       SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
       SDL_RenderClear(ren);
@@ -367,17 +168,17 @@ void chip8_start(void *_win, void *_ren, void *_tex) {
     }
 
     // Used for debuging!
-    //getchar();
+    // getchar();
 
     /**inter.PC = inter.PC + 2;
      *i++;
      * Used for testing, not needed anymore.
      **/
-    
-    drawAtInterval++;
-    if(drawAtInterval == 20) {
-      inter.drawFlag = 1;
-      drawAtInterval = 0;
+
+    timmers++;
+    if (timmers == 60) {
+      inter.delay = (inter.delay > 0) ? inter.delay-- : 0;
+      timmers = 0;
     }
 
     uint32_t now = SDL_GetTicks();

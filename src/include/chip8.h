@@ -16,6 +16,8 @@ struct CHIP8 {
 
   uint8_t DispMem[64 * 32 / 8];
   uint8_t drawFlag;
+
+  uint8_t exec_break;
 };
 
 void *chip8_init(char *);

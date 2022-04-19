@@ -54,3 +54,4 @@ dkms.conf
 *.bin
 *.ch8
 chip8
+log.txt
